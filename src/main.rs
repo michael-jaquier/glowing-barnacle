@@ -1,4 +1,4 @@
-use rrec::{router::get_candidate, DemoResult};
+use rrec::{candidate::get_candidate, DemoResult};
 use tracing::info;
 
 #[tokio::main]
@@ -7,6 +7,7 @@ async fn main() -> DemoResult<()> {
     tracing_subscriber::fmt::init();
     let candidate = get_candidate();
     info!("{}", candidate);
+
     let app = rrec::router::router();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3009")
         .await

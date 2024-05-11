@@ -1,13 +1,22 @@
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{extract::Path, routing::get, Router};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::Debug;
-use std::fmt::Display;
-use tracing::info;
+use tracing::{error, info};
 use tracing::instrument;
 
-pub async fn invalid_call() -> (StatusCode, String) {
-    (StatusCode::NOT_FOUND, "Invalid call".to_string())
+use crate::candidate::{get_candidate, Candidate};
+use crate::DemoErrors;
+
+async fn valid_calls() -> String {
+    "/hire/:person".to_string()
+}
+
+#[instrument]
+pub async fn invalid_call() -> axum::http::Response<axum::body::Body> {
+    error!("Invalid API call");
+    DemoErrors::Error1.into_response()
 }
 
 #[instrument]
@@ -26,6 +35,16 @@ pub async fn hire_employee_version(Path(params): Path<Params>) -> String {
         "Hiring {} 🎉 Easy Refactors ahead 🎉 for version {:?}",
         params.person, params.version
     )
+}
+
+#[instrument]
+pub async fn hire_employee_version_v3() -> (StatusCode, String) {
+    info!("Running the hire_employee_version_v3 function");
+    if get_candidate().name == "" {
+        (StatusCode::NOT_FOUND, "No candidate found".to_string())
+    } else {
+        (StatusCode::OK, get_candidate().to_string())
+    }
 }
 
 #[instrument]
@@ -49,7 +68,6 @@ pub async fn hire_employee_v2(Path(params): Path<Params>) -> String {
 pub enum Version {
     V1,
     V2,
-    V3,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -64,38 +82,21 @@ pub struct CouldBeBetterParams {
 }
 
 pub fn router() -> Router {
-    Router::new()
-        .route("/:version/hire/:person", get(hire_employee_version))
-        .route("/hire/:person", get(hire_employee))
-        .fallback(get(invalid_call))
-}
+    let v0_router = Router::new()
+    .route("/hire/:person", get(hire_employee))
+    .route("/help", get(valid_calls));
+    let parameter_version =
+        Router::new().route("/:version/hire/:person", get(hire_employee_version));
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Candidate {
-    pub name: String,
-    pub position: String,
-}
+    let candidate_router = Router::new().route("/hire/", get(hire_employee_version_v3));
 
-impl Candidate {
-    pub fn is_candidate(person: String) -> bool {
-        person.to_lowercase() == get_candidate().name.to_lowercase()
-    }
-}
+    let nested_router_version = Router::new()
+        .nest("/v3", candidate_router)
+        .nest("/", v0_router)
+        .nest("/", parameter_version)
+        .fallback(invalid_call);
 
-pub fn get_candidate() -> Candidate {
-    let yaml_data = include_str!("../candidate.yml");
-    let candidate: Candidate = serde_yaml::from_str(yaml_data).unwrap();
-    candidate
-}
-
-impl Display for Candidate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Welcome! {} to the interview process for Position: {}",
-            self.name, self.position
-        )
-    }
+    nested_router_version
 }
 
 /// --------------------- Ignore this code block
@@ -108,7 +109,6 @@ impl<'de> Deserialize<'de> for Version {
         match s.as_str() {
             "v1" => Ok(Version::V1),
             "v2" => Ok(Version::V2),
-            "v3" => Ok(Version::V3),
             _ => Err(serde::de::Error::custom("invalid version")),
         }
     }
